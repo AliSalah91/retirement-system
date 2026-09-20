@@ -1,9 +1,10 @@
 from datetime import datetime
+import os
 import sqlite3
 import threading
 import pandas as pd
 import streamlit as st
-import os
+
 # إعداد القفل البرمجي الآمن
 lock = threading.Lock()
 
@@ -133,6 +134,8 @@ def load_data():
       ])
     finally:
       conn.close()
+
+
 USERS = {"admin": "1122334455", "employee1": "1111", "employee2": "2222"}
 
 if "logged_in" not in st.session_state:
@@ -237,7 +240,6 @@ else:
         else:
           birth_date = f"{day}/{month}/{year}"
 
-          # الحفظ الفوري المباشر في قاعدة البيانات (بدون إعادة كتابة ملف كامل)
           with lock:
             conn = sqlite3.connect(DB_FILE, check_same_thread=False)
             cursor = conn.cursor()
@@ -283,13 +285,13 @@ else:
       if st.button("🖨️ طباعة", use_container_width=True):
         if not df_data.empty:
           html_report = f"""
-                    <!DOCTYPE html>
-                    <html lang="ar" dir="rtl">
+                <!DOCTYPE html>
+                <html lang="ar" dir="rtl">
                 <head>
                     <meta charset="UTF-8">
                     <title>تقرير جدول المتقدمين</title>
                     <style>
-                        body {{ font-family: 'Cairo', Tahoma, sans-serif; margin: 25px; color: #222; }}
+                        body {{ font-family: 'Cairo', Tahoma, sans-serif; margin: 25px; color: #222; direction: rtl; }}
                         .report-header {{
                             display: flex;
                             justify-content: space-between;
@@ -324,10 +326,14 @@ else:
                 </body>
                 </html>
                 """
-          with open("report.html", "w", encoding="utf-8") as f:
-            f.write(html_report)
-          os.system("start report.html")
-          st.success("تم فتح تقرير الطباعة بنجاح!")
+          st.download_button(
+              label="📥 اضغط لتحميل التقرير",
+              data=html_report,
+              file_name="report.html",
+              mime="text/html",
+              use_container_width=True,
+          )
+          st.success("تم تجهيز التقرير! اضغط على زر التحميل للطباعة.")
         else:
           st.warning("لا توجد بيانات للطباعة!")
 
