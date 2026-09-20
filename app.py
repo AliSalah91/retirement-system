@@ -133,8 +133,6 @@ def load_data():
       ])
     finally:
       conn.close()
-
-
 USERS = {"admin": "1122334455", "employee1": "1111", "employee2": "2222"}
 
 if "logged_in" not in st.session_state:
