@@ -80,23 +80,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# إعداد الاتصال بقاعدة بيانات Supabase السحابية
-from urllib.parse import quote_plus
-
-# إعداد الاتصال بقاعدة بيانات Supabase السحابية
+# إعداد الاتصال بقاعدة بيانات Supabase السحابية بطريقة آمنة ومباشرة
 @st.cache_resource
 def init_connection():
     try:
-        db_user = st.secrets["supabase"]["user"]
-        db_pass = st.secrets["supabase"]["password"]
-        db_host = st.secrets["supabase"]["host"]
-        db_port = st.secrets["supabase"]["port"]
-        db_name = st.secrets["supabase"]["dbname"]
-        
-        # ترميز كلمة المرور تلقائياً لتتعامل مع الرموز الخاصة مثل @
-        encoded_pass = quote_plus(db_pass)
-        
-        db_url = f"postgresql+psycopg2://{db_user}:{encoded_pass}@{db_host}:{db_port}/{db_name}"
+        db_url = st.secrets["supabase"]["url"]
         engine = create_engine(db_url)
         return engine
     except Exception as e:
@@ -126,15 +114,16 @@ def init_db():
 
 init_db()
 
-# تحميل البيانات من قاعدة البيانات السحابية
+# تحميل البيانات من قاعدة البيانات السحابية مع جلب الـ id للحذف والتعديل
 def load_data():
     if not engine:
         return pd.DataFrame(columns=[
-            "التسلسل", "الاسم الثلاثي", "مكان العمل", "تاريخ الميلاد", "الشهادة", "القضاء", "الموظف المدخل"
+            "id", "التسلسل", "الاسم الثلاثي", "مكان العمل", "تاريخ الميلاد", "الشهادة", "القضاء", "الموظف المدخل"
         ])
     try:
         query = """
-            SELECT serial AS "التسلسل", 
+            SELECT id,
+                   serial AS "التسلسل", 
                    name AS "الاسم الثلاثي", 
                    workplace AS "مكان العمل", 
                    birth_date AS "تاريخ الميلاد", 
@@ -142,12 +131,13 @@ def load_data():
                    district AS "القضاء", 
                    username AS "الموظف المدخل" 
             FROM applicants
+            ORDER BY id DESC
         """
         df = pd.read_sql(query, engine)
         return df.fillna("")
     except Exception:
         return pd.DataFrame(columns=[
-            "التسلسل", "الاسم الثلاثي", "مكان العمل", "تاريخ الميلاد", "الشهادة", "القضاء", "الموظف المدخل"
+            "id", "التسلسل", "الاسم الثلاثي", "مكان العمل", "تاريخ الميلاد", "الشهادة", "القضاء", "الموظف المدخل"
         ])
 
 USERS = {"admin": "1122334455", "employee1": "1111", "employee2": "2222"}
@@ -224,9 +214,8 @@ else:
     with col_form:
         st.markdown("#### 📝 إضافة متقدم جديد")
         with st.form("entry_form", clear_on_submit=True):
-            serial = st.text_input(
-                "التسلسل", value=str(len(df_data) + 1) if not df_data.empty else "1"
-            )
+            next_serial = str(len(df_data) + 1) if not df_data.empty else "1"
+            serial = st.text_input("التسلسل", value=next_serial)
             name = st.text_input("الاسم الثلاثي")
             workplace = st.text_input("مكان العمل")
 
@@ -288,7 +277,7 @@ else:
             )
 
         display_df = df_data
-        if search_query:
+        if search_query and not df_data.empty:
             mask = df_data.astype(str).apply(
                 lambda x: x.str.contains(search_query, case=False, na=False)
             ).any(axis=1)
@@ -298,6 +287,8 @@ else:
             st.write("")
             if st.button("🖨️ طباعة", use_container_width=True):
                 if not df_data.empty:
+                    # عرض الجدول بدون عمود id في الطباعة
+                    print_df = display_df.drop(columns=["id"], errors="ignore")
                     html_report = f"""
                         <!DOCTYPE html>
                         <html lang="ar" dir="rtl">
@@ -336,7 +327,7 @@ else:
                                 <div class="report-title">شعبة التقاعد وسجل الخدمة ودعم ذوي الشهداء - ديالى</div>
                                 <div class="report-date">تاريخ التقرير: {datetime.now().strftime('%Y-%m-%d')}</div>
                             </div>
-                            {display_df.to_html(index=False, border=0)}
+                            {print_df.to_html(index=False, border=0)}
                         </body>
                         </html>
                         """
@@ -354,7 +345,8 @@ else:
         with c3:
             st.write("")
             if not df_data.empty:
-                csv_data = df_data.to_csv(index=False).encode("utf-8-sig")
+                export_df = df_data.drop(columns=["id"], errors="ignore")
+                csv_data = export_df.to_csv(index=False).encode("utf-8-sig")
                 st.download_button(
                     "📥 إكسل",
                     data=csv_data,
@@ -363,7 +355,27 @@ else:
                     use_container_width=True,
                 )
 
-        st.dataframe(display_df, use_container_width=True, height=400)
+        # عرض الجدول للمستخدم (إخفاء عمود المعرف id عن العرض المباشر ليبقى منظماً)
+        view_table = display_df.drop(columns=["id"], errors="ignore") if "id" in display_df.columns else display_df
+        st.dataframe(view_table, use_container_width=True, height=350)
+
+        # قسم حذف سجل معين (يظهر للمدير أو الموظفين)
+        if not df_data.empty:
+            with st.expqrd if hasattr(st, 'expander') else st.container(): # استخدام expander آمن
+                with st.expander("🗑️ حذف سجل من القاعدة"):
+                    record_to_delete = st.selectbox(
+                        "اختر اسم المتقدم المراد حذفه:",
+                        options=df_data["id"].tolist(),
+                        format_func=lambda x: f"{df_data[df_data['id'] == x]['التسلسل'].values[0]} - {df_data[df_data['id'] == x]['الاسم الثلاثي'].values[0]}"
+                    )
+                    if st.button("حذف السجل المحدد", type="primary"):
+                        try:
+                            with engine.begin() as conn:
+                                conn.execute(text("DELETE FROM applicants WHERE id = :id"), {"id": record_to_delete})
+                            st.success("تم حذف السجل بنجاح!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"حدث خطأ أثناء الحذف: {e}")
 
         if not df_data.empty:
             st.markdown(
