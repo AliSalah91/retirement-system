@@ -3,7 +3,8 @@ from urllib.parse import quote_plus
 import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine, text
-
+from urllib.parse import quote_plus
+from sqlalchemy import create_engine
 st.set_page_config(
     page_title="نظام إدارة بيانات المحالين على التقاعد", layout="wide"
 )
