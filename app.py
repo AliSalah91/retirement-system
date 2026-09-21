@@ -1,4 +1,5 @@
 from datetime import datetime
+from urllib.parse import quote_plus
 import pandas as pd
 import streamlit as st
 from sqlalchemy import create_engine, text
@@ -80,14 +81,24 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# إعداد الاتصال بقاعدة بيانات Supabase السحابية بطريقة آمنة ومباشرة
+# إعداد الاتصال الآمن بقاعدة بيانات Supabase باستخدام المتغيرات المنفصلة
 @st.cache_resource
 def init_connection():
     try:
-        db_url = st.secrets["supabase"]["url"]
+        db_user = st.secrets["supabase"]["user"]
+        db_pass = st.secrets["supabase"]["password"]
+        db_host = st.secrets["supabase"]["host"]
+        db_port = st.secrets["supabase"]["port"]
+        db_name = st.secrets["supabase"]["dbname"]
+        
+        # ترميز كلمة المرور لتتعامل تلقائياً مع الرموز مثل @ وغيرها
+        encoded_pass = quote_plus(db_pass)
+        
+        db_url = f"postgresql+psycopg2://{db_user}:{encoded_pass}@{db_host}:{db_port}/{db_name}"
         engine = create_engine(db_url)
         return engine
     except Exception as e:
+        st.error(f"خطأ في إعداد الاتصال: {e}")
         return None
 
 engine = init_connection()
@@ -114,7 +125,7 @@ def init_db():
 
 init_db()
 
-# تحميل البيانات من قاعدة البيانات السحابية مع جلب الـ id للحذف والتعديل
+# تحميل البيانات من قاعدة البيانات السحابية
 def load_data():
     if not engine:
         return pd.DataFrame(columns=[
@@ -287,7 +298,6 @@ else:
             st.write("")
             if st.button("🖨️ طباعة", use_container_width=True):
                 if not df_data.empty:
-                    # عرض الجدول بدون عمود id في الطباعة
                     print_df = display_df.drop(columns=["id"], errors="ignore")
                     html_report = f"""
                         <!DOCTYPE html>
@@ -355,27 +365,24 @@ else:
                     use_container_width=True,
                 )
 
-        # عرض الجدول للمستخدم (إخفاء عمود المعرف id عن العرض المباشر ليبقى منظماً)
         view_table = display_df.drop(columns=["id"], errors="ignore") if "id" in display_df.columns else display_df
         st.dataframe(view_table, use_container_width=True, height=350)
 
-        # قسم حذف سجل معين (يظهر للمدير أو الموظفين)
         if not df_data.empty:
-            with st.expqrd if hasattr(st, 'expander') else st.container(): # استخدام expander آمن
-                with st.expander("🗑️ حذف سجل من القاعدة"):
-                    record_to_delete = st.selectbox(
-                        "اختر اسم المتقدم المراد حذفه:",
-                        options=df_data["id"].tolist(),
-                        format_func=lambda x: f"{df_data[df_data['id'] == x]['التسلسل'].values[0]} - {df_data[df_data['id'] == x]['الاسم الثلاثي'].values[0]}"
-                    )
-                    if st.button("حذف السجل المحدد", type="primary"):
-                        try:
-                            with engine.begin() as conn:
-                                conn.execute(text("DELETE FROM applicants WHERE id = :id"), {"id": record_to_delete})
-                            st.success("تم حذف السجل بنجاح!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"حدث خطأ أثناء الحذف: {e}")
+            with st.expander("🗑️ حذف سجل من القاعدة"):
+                record_to_delete = st.selectbox(
+                    "اختر اسم المتقدم المراد حذفه:",
+                    options=df_data["id"].tolist(),
+                    format_func=lambda x: f"{df_data[df_data['id'] == x]['التسلسل'].values[0]} - {df_data[df_data['id'] == x]['الاسم الثلاثي'].values[0]}"
+                )
+                if st.button("حذف السجل المحدد", type="primary"):
+                    try:
+                        with engine.begin() as conn:
+                            conn.execute(text("DELETE FROM applicants WHERE id = :id"), {"id": record_to_delete})
+                        st.success("تم حذف السجل بنجاح!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"حدث خطأ أثناء الحذف: {e}")
 
         if not df_data.empty:
             st.markdown(
