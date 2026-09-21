@@ -81,10 +81,22 @@ st.markdown(
 )
 
 # إعداد الاتصال بقاعدة بيانات Supabase السحابية
+from urllib.parse import quote_plus
+
+# إعداد الاتصال بقاعدة بيانات Supabase السحابية
 @st.cache_resource
 def init_connection():
     try:
-        db_url = st.secrets["supabase"]["url"]
+        db_user = st.secrets["supabase"]["user"]
+        db_pass = st.secrets["supabase"]["password"]
+        db_host = st.secrets["supabase"]["host"]
+        db_port = st.secrets["supabase"]["port"]
+        db_name = st.secrets["supabase"]["dbname"]
+        
+        # ترميز كلمة المرور تلقائياً لتتعامل مع الرموز الخاصة مثل @
+        encoded_pass = quote_plus(db_pass)
+        
+        db_url = f"postgresql+psycopg2://{db_user}:{encoded_pass}@{db_host}:{db_port}/{db_name}"
         engine = create_engine(db_url)
         return engine
     except Exception as e:
