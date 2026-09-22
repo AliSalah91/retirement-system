@@ -8,7 +8,7 @@ st.set_page_config(
     page_title="نظام إدارة بيانات المحالين على التقاعد", layout="wide"
 )
 
-# تنسيق الواجهة (يبقى كما هو)
+# تنسيق الواجهة
 st.markdown(
     """
     <style>
@@ -83,7 +83,7 @@ st.markdown(
 )
 
 
-# دالة الاتصال بقاعدة بيانات PostgreSQL مع تفعيل التشفير الآمن
+# 1. دالة الاتصال بقاعدة بيانات PostgreSQL مع تفعيل التشفير الآمن
 def get_db_connection():
     return psycopg2.connect(
         host=st.secrets["postgres"]["host"],
@@ -95,41 +95,65 @@ def get_db_connection():
     )
 
 
-# تهيئة قاعدة البيانات وإنشاء الجدول إذا لم يكن موجوداً
+# 2. تهيئة قاعدة البيانات وإنشاء الجدول إذا لم يكن موجوداً
 def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS applicants (
-            id SERIAL PRIMARY KEY,
-            serial TEXT,
-            name TEXT,
-            workplace TEXT,
-            birth_date TEXT,
-            degree TEXT,
-            district TEXT,
-            username TEXT
-        )
-    """)
-    conn.commit()
-    cursor.close()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS applicants (
+                id SERIAL PRIMARY KEY,
+                serial TEXT,
+                name TEXT,
+                workplace TEXT,
+                birth_date TEXT,
+                degree TEXT,
+                district TEXT,
+                username TEXT
+            )
+        """)
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        st.error(f"خطأ في إنشاء الجدول: {e}")
 
 
 init_db()
 
 
-# تحميل البيانات من PostgreSQL
+# 3. تحميل البيانات من PostgreSQL (تم تصحيح الاستعلام لتجنب أخطاء بناء الجملة)
 def load_data():
     try:
         conn = get_db_connection()
-        df = pd.read_sql(
-            "SELECT serial AS 'التسلسل', name AS 'الاسم الثلاثي', workplace AS 'مكان العمل', birth_date AS 'تاريخ الميلاد', degree AS 'الشهادة', district AS 'القضاء', username AS 'الموظف المدخل' FROM applicants",
-            conn,
-        )
+        query = "SELECT serial, name, workplace, birth_date, degree, district, username FROM applicants"
+        df = pd.read_sql(query, conn)
         conn.close()
+
+        # إعادة تسمية الأعمدة لتظهر باللغة العربية في الواجهة بشكل صحيح وآمن
+        if not df.empty:
+            df.columns = [
+                "التسلسل",
+                "الاسم الثلاثي",
+                "مكان العمل",
+                "تاريخ الميلاد",
+                "الشهادة",
+                "القضاء",
+                "الموظف المدخل",
+            ]
+        else:
+            df = pd.DataFrame(columns=[
+                "التسلسل",
+                "الاسم الثلاثي",
+                "مكان العمل",
+                "تاريخ الميلاد",
+                "الشهادة",
+                "القضاء",
+                "الموظف المدخل",
+            ])
         return df.fillna("")
     except Exception as e:
+        st.error(f"خطأ في تحميل البيانات: {e}")
         return pd.DataFrame(columns=[
             "التسلسل",
             "الاسم الثلاثي",
@@ -283,7 +307,7 @@ else:
             )
 
         display_df = df_data
-        if search_query:
+        if search_query and not df_data.empty:
             mask = df_data.astype(str).apply(
                 lambda x: x.str.contains(search_query, case=False, na=False)
             ).any(axis=1)
