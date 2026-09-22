@@ -1,15 +1,14 @@
 from datetime import datetime
-from urllib.parse import quote_plus
+import os
 import pandas as pd
+import psycopg2
 import streamlit as st
-from sqlalchemy import create_engine, text
-from urllib.parse import quote_plus
-from sqlalchemy import create_engine
+
 st.set_page_config(
     page_title="نظام إدارة بيانات المحالين على التقاعد", layout="wide"
 )
 
-# تنسيق الواجهة
+# تنسيق الواجهة (يبقى كما هو)
 st.markdown(
     """
     <style>
@@ -77,326 +76,301 @@ st.markdown(
     <div class="official-header">
         <h2>📌 شعبة التقاعد وسجل الخدمة ودعم ذوي الشهداء</h2>
         <p>محافظة ديالى — نظام إدارة بيانات المحالين على التقاعد </p>
+        <p>برمجة وتصميم : الدكتور علي صلاح حميد </p>
     </div>
 """,
     unsafe_allow_html=True,
 )
 
-# إعداد الاتصال الآمن بقاعدة بيانات Supabase باستخدام المتغيرات المنفصلة
-@st.cache_resource
-def init_connection():
-    try:
-        db_user = st.secrets["supabase"]["user"]
-        db_pass = st.secrets["supabase"]["password"]
-        db_host = st.secrets["supabase"]["host"]
-        db_port = st.secrets["supabase"]["port"]
-        db_name = st.secrets["supabase"]["dbname"]
-        
-        # ترميز كلمة المرور لتتعامل تلقائياً مع الرموز مثل @ وغيرها
-        encoded_pass = quote_plus(db_pass)
-        
-        db_url = f"postgresql+psycopg2://{db_user}:{encoded_pass}@{db_host}:{db_port}/{db_name}"
-        engine = create_engine(db_url)
-        return engine
-    except Exception as e:
-        st.error(f"خطأ في إعداد الاتصال: {e}")
-        return None
 
-engine = init_connection()
+# دالة الاتصال بقاعدة بيانات PostgreSQL باستخدام أسرار Streamlit
+def get_db_connection():
+  return psycopg2.connect(
+      host=st.secrets["postgres"]["host"],
+      database=st.secrets["postgres"]["database"],
+      user=st.secrets["postgres"]["user"],
+      password=st.secrets["postgres"]["password"],
+      port=st.secrets["postgres"]["port"],
+  )
+
 
 # تهيئة قاعدة البيانات وإنشاء الجدول إذا لم يكن موجوداً
 def init_db():
-    if engine:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS applicants (
-                        id SERIAL PRIMARY KEY,
-                        serial TEXT,
-                        name TEXT,
-                        workplace TEXT,
-                        birth_date TEXT,
-                        degree TEXT,
-                        district TEXT,
-                        username TEXT
-                    );
-                """))
-        except Exception:
-            pass
+  conn = get_db_connection()
+  cursor = conn.cursor()
+  cursor.execute("""
+        CREATE TABLE IF NOT EXISTS applicants (
+            id SERIAL PRIMARY KEY,
+            serial TEXT,
+            name TEXT,
+            workplace TEXT,
+            birth_date TEXT,
+            degree TEXT,
+            district TEXT,
+            username TEXT
+        )
+    """)
+  conn.commit()
+  cursor.close()
+  conn.close()
+
 
 init_db()
 
-# تحميل البيانات من قاعدة البيانات السحابية
-def load_data():
-    if not engine:
-        return pd.DataFrame(columns=[
-            "id", "التسلسل", "الاسم الثلاثي", "مكان العمل", "تاريخ الميلاد", "الشهادة", "القضاء", "الموظف المدخل"
-        ])
-    try:
-        query = """
-            SELECT id,
-                   serial AS "التسلسل", 
-                   name AS "الاسم الثلاثي", 
-                   workplace AS "مكان العمل", 
-                   birth_date AS "تاريخ الميلاد", 
-                   degree AS "الشهادة", 
-                   district AS "القضاء", 
-                   username AS "الموظف المدخل" 
-            FROM applicants
-            ORDER BY id DESC
-        """
-        df = pd.read_sql(query, engine)
-        return df.fillna("")
-    except Exception:
-        return pd.DataFrame(columns=[
-            "id", "التسلسل", "الاسم الثلاثي", "مكان العمل", "تاريخ الميلاد", "الشهادة", "القضاء", "الموظف المدخل"
-        ])
 
-USERS = {"admin": "1122334455", "employee1": "1111", "employee2": "2222"}
+# تحميل البيانات من PostgreSQL
+def load_data():
+  try:
+    conn = get_db_connection()
+    df = pd.read_sql(
+        "SELECT serial AS 'التسلسل', name AS 'الاسم الثلاثي', workplace AS 'مكان العمل', birth_date AS 'تاريخ الميلاد', degree AS 'الشهادة', district AS 'القضاء', username AS 'الموظف المدخل' FROM applicants",
+        conn,
+    )
+    conn.close()
+    return df.fillna("")
+  except Exception as e:
+    return pd.DataFrame(columns=[
+        "التسلسل",
+        "الاسم الثلاثي",
+        "مكان العمل",
+        "تاريخ الميلاد",
+        "الشهادة",
+        "القضاء",
+        "الموظف المدخل",
+    ])
+
+
+USERS = {"admin": "12345", "employee1": "1111", "employee2": "2222"}
 
 if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+  st.session_state.logged_in = False
 if "username" not in st.session_state:
-    st.session_state.username = ""
+  st.session_state.username = ""
 
 if not st.session_state.logged_in:
-    st.markdown(
-        """
+  st.markdown(
+      """
         <div class="login-box">
             <h3 style="text-align: center; color: #1e3a8a; margin-bottom: 20px;">🔐 تسجيل دخول الموظفين</h3>
         </div>
     """,
-        unsafe_allow_html=True,
-    )
+      unsafe_allow_html=True,
+  )
 
-    _, col2, _ = st.columns([1, 1.2, 1])
-    with col2:
-        with st.form("login_form"):
-            username_input = st.text_input("اسم المستخدم")
-            password_input = st.text_input("كلمة المرور", type="password")
-            login_btn = st.form_submit_button(
-                "تسجيل الدخول", use_container_width=True
-            )
+  _, col2, _ = st.columns([1, 1.2, 1])
+  with col2:
+    with st.form("login_form"):
+      username_input = st.text_input("اسم المستخدم")
+      password_input = st.text_input("كلمة المرور", type="password")
+      login_btn = st.form_submit_button(
+          "تسجيل الدخول", use_container_width=True
+      )
 
-            if login_btn:
-                if (
-                    username_input in USERS
-                    and USERS[username_input] == password_input
-                ):
-                    st.session_state.logged_in = True
-                    st.session_state.username = username_input
-                    st.success("تم تسجيل الدخول بنجاح!")
-                    st.rerun()
-                else:
-                    st.error("اسم المستخدم أو كلمة المرور غير صحيحة!")
+      if login_btn:
+        if (
+            username_input in USERS
+            and USERS[username_input] == password_input
+        ):
+          st.session_state.logged_in = True
+          st.session_state.username = username_input
+          st.success("تم تسجيل الدخول بنجاح!")
+          st.rerun()
+        else:
+          st.error("اسم المستخدم أو كلمة المرور غير صحيحة!")
 
 else:
-    df_data = load_data()
+  df_data = load_data()
 
-    districts_list = [
-        "بعقوبة",
-        "خانقين",
-        "جلولاء",
-        "قره تبة",
-        "المقدادية",
-        "خالص",
-        "بلدروز",
-    ]
-    degrees_list = [
-        "ابتدائية",
-        "متوسطة",
-        "إعدادية",
-        "دبلوم",
-        "بكالوريوس",
-        "ماجستير",
-        "دكتوراه",
-    ]
+  districts_list = [
+      "بعقوبة",
+      "خانقين",
+      "جلولاء",
+      "قره تبة",
+      "المقدادية",
+      "خالص",
+      "بلدروز",
+  ]
+  degrees_list = [
+      "ابتدائية",
+      "متوسطة",
+      "إعدادية",
+      "دبلوم",
+      "بكالوريوس",
+      "ماجستير",
+      "دكتوراه",
+  ]
 
-    top_c1, top_c2 = st.columns([4, 1])
-    with top_c1:
-        st.info(f"👤 الموظف المتصل حالياً: **{st.session_state.username}**")
-    with top_c2:
-        if st.button("تسجيل الخروج", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.username = ""
+  top_c1, top_c2 = st.columns([4, 1])
+  with top_c1:
+    st.info(f"👤 الموظف المتصل حالياً: **{st.session_state.username}**")
+  with top_c2:
+    if st.button("تسجيل الخروج", use_container_width=True):
+      st.session_state.logged_in = False
+      st.session_state.username = ""
+      st.rerun()
+
+  col_form, col_table = st.columns([1, 2.2], gap="large")
+
+  with col_form:
+    st.markdown("#### 📝 إضافة متقدم جديد")
+    with st.form("entry_form", clear_on_submit=True):
+      serial = st.text_input(
+          "التسلسل", value=str(len(df_data) + 1) if not df_data.empty else "1"
+      )
+      name = st.text_input("الاسم الثلاثي")
+      workplace = st.text_input("مكان العمل")
+
+      st.markdown("تاريخ الميلاد:")
+      col_y, col_m, col_d = st.columns(3)
+      with col_y:
+        year = st.selectbox(
+            "السنة", [str(i) for i in range(2010, 1940, -1)], index=30
+        )
+      with col_m:
+        month = st.selectbox("الشهر", [str(i) for i in range(1, 13)])
+      with col_d:
+        day = st.selectbox("اليوم", [str(i) for i in range(1, 32)])
+
+      degree = st.selectbox("الشهادة", degrees_list)
+      district = st.selectbox("القضاء", districts_list)
+
+      submitted = st.form_submit_button(
+          "💾 حفظ وإضافة السجل", use_container_width=True
+      )
+
+      if submitted:
+        if not name or not workplace:
+          st.error("يرجى ملء الاسم الثلاثي ومكان العمل على الأقل!")
+        else:
+          birth_date = f"{day}/{month}/{year}"
+
+          # الحفظ في قاعدة بيانات PostgreSQL
+          try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                            INSERT INTO applicants (serial, name, workplace, birth_date, degree, district, username)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                (
+                    serial,
+                    name,
+                    workplace,
+                    birth_date,
+                    degree,
+                    district,
+                    st.session_state.username,
+                ),
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            st.success(f"تمت إضافة المتقدم ({name}) بنجاح!")
             st.rerun()
+          except Exception as e:
+            st.error(f"حدث خطأ أثناء الحفظ: {e}")
 
-    col_form, col_table = st.columns([1, 2.2], gap="large")
+  with col_table:
+    st.markdown("#### 📊 جدول السجلات والبيانات المسجلة")
 
-    with col_form:
-        st.markdown("#### 📝 إضافة متقدم جديد")
-        with st.form("entry_form", clear_on_submit=True):
-            next_serial = str(len(df_data) + 1) if not df_data.empty else "1"
-            serial = st.text_input("التسلسل", value=next_serial)
-            name = st.text_input("الاسم الثلاثي")
-            workplace = st.text_input("مكان العمل")
+    c1, c2, c3 = st.columns([2.5, 1, 1])
+    with c1:
+      search_query = st.text_input(
+          "🔍 بحث سريع:", placeholder="ابحث بالاسم، القضاء..."
+      )
 
-            st.markdown("تاريخ الميلاد:")
-            col_y, col_m, col_d = st.columns(3)
-            with col_y:
-                year = st.selectbox(
-                    "السنة", [str(i) for i in range(2010, 1940, -1)], index=30
-                )
-            with col_m:
-                month = st.selectbox("الشهر", [str(i) for i in range(1, 13)])
-            with col_d:
-                day = st.selectbox("اليوم", [str(i) for i in range(1, 32)])
+    display_df = df_data
+    if search_query:
+      mask = df_data.astype(str).apply(
+          lambda x: x.str.contains(search_query, case=False, na=False)
+      ).any(axis=1)
+      display_df = df_data[mask]
 
-            degree = st.selectbox("الشهادة", degrees_list)
-            district = st.selectbox("القضاء", districts_list)
-
-            submitted = st.form_submit_button(
-                "💾 حفظ وإضافة السجل", use_container_width=True
-            )
-
-            if submitted:
-                if not name or not workplace:
-                    st.error("يرجى ملء الاسم الثلاثي ومكان العمل على الأقل!")
-                else:
-                    birth_date = f"{day}/{month}/{year}"
-                    if engine:
-                        try:
-                            with engine.begin() as conn:
-                                conn.execute(
-                                    text("""
-                                        INSERT INTO applicants (serial, name, workplace, birth_date, degree, district, username)
-                                        VALUES (:serial, :name, :workplace, :birth_date, :degree, :district, :username)
-                                    """),
-                                    {
-                                        "serial": serial,
-                                        "name": name,
-                                        "workplace": workplace,
-                                        "birth_date": birth_date,
-                                        "degree": degree,
-                                        "district": district,
-                                        "username": st.session_state.username,
-                                    }
-                                )
-                            st.success(f"تمت إضافة المتقدم ({name}) بنجاح إلى السحابة!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"حدث خطأ أثناء الحفظ: {e}")
-                    else:
-                        st.error("لا يوجد اتصال بقاعدة البيانات السحابية!")
-
-    with col_table:
-        st.markdown("#### 📊 جدول السجلات والبيانات المسجلة")
-
-        c1, c2, c3 = st.columns([2.5, 1, 1])
-        with c1:
-            search_query = st.text_input(
-                "🔍 بحث سريع:", placeholder="ابحث بالاسم، القضاء..."
-            )
-
-        display_df = df_data
-        if search_query and not df_data.empty:
-            mask = df_data.astype(str).apply(
-                lambda x: x.str.contains(search_query, case=False, na=False)
-            ).any(axis=1)
-            display_df = df_data[mask]
-
-        with c2:
-            st.write("")
-            if st.button("🖨️ طباعة", use_container_width=True):
-                if not df_data.empty:
-                    print_df = display_df.drop(columns=["id"], errors="ignore")
-                    html_report = f"""
-                        <!DOCTYPE html>
-                        <html lang="ar" dir="rtl">
-                        <head>
-                            <meta charset="UTF-8">
-                            <title>تقرير جدول المتقدمين</title>
-                            <style>
-                                body {{ font-family: 'Cairo', Tahoma, sans-serif; margin: 25px; color: #222; direction: rtl; }}
-                                .report-header {{
-                                    display: flex;
-                                    justify-content: space-between;
-                                    align-items: center;
-                                    border-bottom: 2px solid #1e3a8a;
-                                    padding-bottom: 12px;
-                                    margin-bottom: 20px;
-                                }}
-                                .report-title {{
-                                    font-size: 18px;
-                                    font-weight: bold;
-                                    color: #1e3a8a;
-                                    text-align: right;
-                                }}
-                                .report-date {{
-                                    font-size: 14px;
-                                    color: #475569;
-                                    text-align: left;
-                                }}
-                                table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
-                                th, td {{ border: 1px solid #94a3b8; padding: 8px; text-align: center; font-size: 13px; }}
-                                th {{ background-color: #1e3a8a; color: white; }}
-                                tr:nth-child(even) {{ background-color: #f8fafc; }}
-                            </style>
-                        </head>
-                        <body onload="window.print()">
-                            <div class="report-header">
-                                <div class="report-title">شعبة التقاعد وسجل الخدمة ودعم ذوي الشهداء - ديالى</div>
-                                <div class="report-date">تاريخ التقرير: {datetime.now().strftime('%Y-%m-%d')}</div>
-                            </div>
-                            {print_df.to_html(index=False, border=0)}
-                        </body>
-                        </html>
-                        """
-                    st.download_button(
-                        label="📥 اضغط لتحميل التقرير",
-                        data=html_report,
-                        file_name="report.html",
-                        mime="text/html",
-                        use_container_width=True,
-                    )
-                    st.success("تم تجهيز التقرير! اضغط على زر التحميل للطباعة.")
-                else:
-                    st.warning("لا توجد بيانات للطباعة!")
-
-        with c3:
-            st.write("")
-            if not df_data.empty:
-                export_df = df_data.drop(columns=["id"], errors="ignore")
-                csv_data = export_df.to_csv(index=False).encode("utf-8-sig")
-                st.download_button(
-                    "📥 إكسل",
-                    data=csv_data,
-                    file_name="قائمة_المتقدمين.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                )
-
-        view_table = display_df.drop(columns=["id"], errors="ignore") if "id" in display_df.columns else display_df
-        st.dataframe(view_table, use_container_width=True, height=350)
-
+    with c2:
+      st.write("")
+      if st.button("🖨️ طباعة", use_container_width=True):
         if not df_data.empty:
-            with st.expander("🗑️ حذف سجل من القاعدة"):
-                record_to_delete = st.selectbox(
-                    "اختر اسم المتقدم المراد حذفه:",
-                    options=df_data["id"].tolist(),
-                    format_func=lambda x: f"{df_data[df_data['id'] == x]['التسلسل'].values[0]} - {df_data[df_data['id'] == x]['الاسم الثلاثي'].values[0]}"
-                )
-                if st.button("حذف السجل المحدد", type="primary"):
-                    try:
-                        with engine.begin() as conn:
-                            conn.execute(text("DELETE FROM applicants WHERE id = :id"), {"id": record_to_delete})
-                        st.success("تم حذف السجل بنجاح!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"حدث خطأ أثناء الحذف: {e}")
+          html_report = f"""
+                    <!DOCTYPE html>
+                    <html lang="ar" dir="rtl">
+                    <head>
+                        <meta charset="UTF-8">
+                        <title>تقرير جدول المتقدمين</title>
+                        <style>
+                            body {{ font-family: 'Cairo', Tahoma, sans-serif; margin: 25px; color: #222; }}
+                            .report-header {{
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                border-bottom: 2px solid #1e3a8a;
+                                padding-bottom: 12px;
+                                margin-bottom: 20px;
+                            }}
+                            .report-title {{
+                                font-size: 18px;
+                                font-weight: bold;
+                                color: #1e3a8a;
+                                text-align: right;
+                            }}
+                            .report-date {{
+                                font-size: 14px;
+                                color: #475569;
+                                text-align: left;
+                            }}
+                            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
+                            th, td {{ border: 1px solid #94a3b8; padding: 8px; text-align: center; font-size: 13px; }}
+                            th {{ background-color: #1e3a8a; color: white; }}
+                            tr:nth-child(even) {{ background-color: #f8fafc; }}
+                        </style>
+                    </head>
+                    <body onload="window.print()">
+                        <div class="report-header">
+                            <div class="report-title">شعبة التقاعد وسجل الخدمة ودعم ذوي الشهداء - ديالى</div>
+                            <div class="report-date">تاريخ التقرير: {datetime.now().strftime('%Y-%m-%d')}</div>
+                        </div>
+                        {display_df.to_html(index=False, border=0)}
+                    </body>
+                    </html>
+                    """
+          st.download_button(
+              "📄 تحميل تقرير الطباعة HTML",
+              data=html_report.encode("utf-8"),
+              file_name="report.html",
+              mime="text/html",
+              use_container_width=True,
+          )
+        else:
+          st.warning("لا توجد بيانات للطباعة!")
 
-        if not df_data.empty:
-            st.markdown(
-                f"""
-                <div class="stats-box">
-                    <b>📌 إحصائيات سريعة:</b> العدد الكلي للمتقدمين المسجلين: <b>{len(df_data)}</b> متقدم | عدد الأقضية المغطاة: <b>{df_data['القضاء'].nunique()}</b> أقضية
-                </div>
-            """,
-                unsafe_allow_html=True,
-            )
+    with c3:
+      st.write("")
+      if not df_data.empty:
+        csv_data = df_data.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            "📥 إكسل",
+            data=csv_data,
+            file_name="قائمة_المتقدمين.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+    st.dataframe(display_df, use_container_width=True, height=400)
+
+    if not df_data.empty:
+      st.markdown(
+          f"""
+            <div class="stats-box">
+                <b>📌 إحصائيات سريعة:</b> العدد الكلي للمتقدمين المسجلين: <b>{len(df_data)}</b> متقدم | عدد الأقضية المغطاة: <b>{df_data['القضاء'].nunique()}</b> أقضية
+            </div>
+        """,
+          unsafe_allow_html=True,
+      )
 
 st.markdown("---")
 st.markdown(
-    "<div style='text-align: center; color: #64748b; font-weight: bold; font-size: 13px;'>برمجة وتصميم : الدكتور علي صلاح </div>",
+    "<div style='text-align: center; color: #64748b; font-weight: bold; font-size:"
+    " 13px;'>برمجة وتصميم : الدكتور علي صلاح </div>",
     unsafe_allow_html=True,
 )
