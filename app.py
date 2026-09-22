@@ -83,16 +83,9 @@ st.markdown(
 )
 
 
-# 1. دالة الاتصال بقاعدة بيانات PostgreSQL مع تفعيل التشفير الآمن
+# 1. دالة الاتصال بقاعدة بيانات PostgreSQL باستخدام الـ URI المباشر
 def get_db_connection():
-    return psycopg2.connect(
-        host=st.secrets["postgres"]["host"],
-        database=st.secrets["postgres"]["database"],
-        user=st.secrets["postgres"]["user"],
-        password=st.secrets["postgres"]["password"],
-        port=st.secrets["postgres"]["port"],
-        sslmode="require",
-    )
+    return psycopg2.connect(st.secrets["postgres"]["uri"], sslmode="require")
 
 
 # 2. تهيئة قاعدة البيانات وإنشاء الجدول إذا لم يكن موجوداً
@@ -122,7 +115,7 @@ def init_db():
 init_db()
 
 
-# 3. تحميل البيانات من PostgreSQL (تم تصحيح الاستعلام لتجنب أخطاء بناء الجملة)
+# 3. تحميل البيانات من PostgreSQL
 def load_data():
     try:
         conn = get_db_connection()
@@ -130,7 +123,6 @@ def load_data():
         df = pd.read_sql(query, conn)
         conn.close()
 
-        # إعادة تسمية الأعمدة لتظهر باللغة العربية في الواجهة بشكل صحيح وآمن
         if not df.empty:
             df.columns = [
                 "التسلسل",
@@ -269,15 +261,14 @@ else:
                 else:
                     birth_date = f"{day}/{month}/{year}"
 
-                    # الحفظ في قاعدة بيانات PostgreSQL
                     try:
                         conn = get_db_connection()
                         cursor = conn.cursor()
                         cursor.execute(
                             """
-                                    INSERT INTO applicants (serial, name, workplace, birth_date, degree, district, username)
-                                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                                """,
+                                INSERT INTO applicants (serial, name, workplace, birth_date, degree, district, username)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            """,
                             (
                                 serial,
                                 name,
